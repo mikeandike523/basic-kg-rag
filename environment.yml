@@ -1,0 +1,17 @@
+name: basic-kg-rag-env
+channels:
+  - pytorch
+  - conda-forge
+  - nvidia
+  - defaults
+dependencies:
+  - python=3.12
+  - pip
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  - tqdm
+  - requests
+  - click
+  - python-dotenv
