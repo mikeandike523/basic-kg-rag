@@ -99,7 +99,7 @@ def generate_sentence(start, start_pos, relation, end, end_pos):
         },
         {"role": "user", "content": relation_string},
     ]
-    payload = {"messages": chat, "temperature": 0.4, "top_p": 0.95, "max_tokens": 64}
+    payload = {"messages": chat, "temperature": 0.2, "top_p": 0.95, "max_tokens": 64}
     resp = call_local_llm(
         "http://localhost:5000/completion", payload, on_429_alt_sizes=[128, 256]
     )
