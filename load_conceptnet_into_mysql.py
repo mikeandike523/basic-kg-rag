@@ -213,8 +213,6 @@ def main(restart):
 
                 # weight = get_truth_value(generate_sentence(s, sp, rel, e, ep)) or 0.0
 
-                os.system("clear")
-
                 print(f"Processing line {idx + 1} of {total_lines}...")
                 sentence = generate_sentence(s, sp, rel, e, ep)
 
