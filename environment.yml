@@ -15,3 +15,7 @@ dependencies:
   - requests
   - click
   - python-dotenv
+  - mysql-connector-python
+  - pytorch
+  - transformers
+  - SentencePiece
