@@ -105,7 +105,6 @@ def generate_sentence(start, start_pos, relation, end, end_pos):
     Convert a relation tuple into a simple sentence via the LLM.
     """
     basic_sentence = format_basic_sentence(start, relation, end)
-    relation_string = f"({start}) - ({relation}) - ({end})"
     chat = [
         {
             "role": "system",
