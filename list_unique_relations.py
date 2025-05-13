@@ -7,13 +7,7 @@ from dotenv import dotenv_values
 import click
 
 
-# === Configurable batch size ===
-BATCH_SIZE = 4
-
-# === Env & checkpoint constants ===
-
 DATA_FILE = "data/conceptnet-data-en-formatted.tsv"
-
 
 def count_lines(file_path):
     """

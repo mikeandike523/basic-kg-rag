@@ -11,3 +11,5 @@ termcolor
 bitsandbytes
 
 inflection
+
+happytransformer

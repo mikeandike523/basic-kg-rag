@@ -1,4 +1,3 @@
-import json
 import os
 import re
 import mysql.connector
@@ -6,12 +5,10 @@ from termcolor import colored
 from tqdm import tqdm
 from dotenv import dotenv_values
 import click
-from run_mistral import completion, UnfinishedResponseError
 import inflection
-import warnings
 
 # === Configurable batch size ===
-BATCH_SIZE = 4
+BATCH_SIZE = 1024
 
 # === Env & checkpoint constants ===
 values = dotenv_values("mysql-dev-server/.env")
@@ -45,14 +42,10 @@ with open("unique_relations.txt", "r", encoding="utf-8") as f:
     raw_text = f.read()
     relation_templates = parse_relation_templates(raw_text)
 
-for key, template in relation_templates.items():
-    print(f"{key}: {template}")
-
-
 def format_basic_sentence(start_term, relation_name, end_term):
     if relation_name not in relation_templates:
-        print(colored(f"Unknown relation: {relation_name}", "yellow"))
         return f"{"'"+start_term.replace("_"," ")+"'"} {inflection.underscore(relation_name).lower().replace("_"," ")} {"'"+end_term.replace("_"," ")+"'"}."
+    
     template = relation_templates[relation_name]
     value = template.replace("<A>", "'" + start_term.replace("_", " ") + "'").replace(
         "<B>", "'" + end_term.replace("_", " ") + "'"
@@ -79,59 +72,6 @@ def count_lines(file_path):
     return line_count
 
 
-def get_mistral_completion(payload, on_429_alt_sizes=None):
-    """
-    Send payload to local LLM; on 429, retry with smaller or alternative max_tokens.
-    """
-    original_max = payload.get("max_tokens")
-    alt_sizes = [original_max] + (on_429_alt_sizes or [])
-
-    print("\n----\n")
-    print(colored(payload["messages"][0]["content"], "magenta"))
-    print(colored(payload["messages"][1]["content"], "blue"))
-
-    for max_tokens in alt_sizes:
-        print(f"Attempting with max_tokens = {max_tokens}")
-        payload["max_tokens"] = max_tokens
-        try:
-            resp = completion(payload)
-            print(colored(resp.strip(), "green"))
-            print("\n----\n")
-            return {"role": "assistant", "content": resp.strip()}
-        except UnfinishedResponseError as e:
-            print(str(e))
-    raise Exception("All max_tokens options resulted in incomplete responses.")
-
-
-def generate_sentence(start, start_pos, relation, end, end_pos):
-    """
-    Convert a relation tuple into a simple sentence via the LLM.
-    """
-    basic_sentence = format_basic_sentence(start, relation, end)
-    chat = [
-        {
-            "role": "system",
-            "content": """
-
-Fix the grammar of the sentence if needed.
-
-Generalize overly-specific examples.
-Correct tenses.
-Correct any factual incorrectness of unclarity.
-Remove quotes when appropriate.
-Add quotes when appropriate.
-
-Output only the final, correct sentence.
-
-""".strip(),
-        },
-        {"role": "user", "content": basic_sentence},
-    ]
-    payload = {"messages": chat, "temperature": 0.35, "top_p": 0.95, "max_tokens": 64}
-    resp = get_mistral_completion(payload, on_429_alt_sizes=[128, 256])
-    return resp["content"].strip()
-
-
 @click.command()
 @click.option(
     "--restart",
@@ -140,7 +80,6 @@ Output only the final, correct sentence.
     help="If set, clear the table and start from the beginning.",
 )
 def main(restart):
-    # 1. Figure out where to start
 
     if not os.path.isfile(CHECKPOINT_FILE):
         with open(CHECKPOINT_FILE, "w") as fl:
@@ -164,7 +103,6 @@ def main(restart):
             start_line = 0
 
     # 2. Connect to MySQL
-    print("Connecting to MySQL…")
     conn = mysql.connector.connect(
         host="localhost",
         port=PORT,
@@ -181,12 +119,10 @@ def main(restart):
         """
         CREATE TABLE IF NOT EXISTS conceptnet_en (
             id INT AUTO_INCREMENT PRIMARY KEY,
-            start_node VARCHAR(255),
-            start_pos ENUM('noun','verb','adjective','adverb','any'),
-            relation VARCHAR(100),
-            end_node VARCHAR(255),
-            end_pos ENUM('noun','verb','adjective','adverb','any'),
-            weight FLOAT DEFAULT 1.0,
+            start_node TEXT,
+            relation VARCHAR(64),
+            end_node TEXT,
+            weight FLOAT,
             sentence TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
@@ -196,8 +132,8 @@ def main(restart):
 
     insert_sql = """
         INSERT INTO conceptnet_en
-          (start_node, start_pos, relation, end_node, end_pos, weight, sentence)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+          (start_node, relation, end_node, weight, sentence)
+        VALUES (%s, %s, %s, %s, %s)
     """
 
     # 4. Process file in batches, skipping up to start_line
@@ -205,44 +141,52 @@ def main(restart):
     print(f"Processing {total_lines} lines (resuming at {start_line})…")
 
     records = []
-    # with open(DATA_FILE, "r", encoding="utf-8") as f, tqdm(
-    #     total=total_lines, desc="Lines processed"
-    # ) as pbar:
 
-    with open(DATA_FILE, "r", encoding="utf-8") as f:
+    with open(DATA_FILE, "r", encoding="utf-8") as f, tqdm(
+        dynamic_ncols=True,
+        total = total_lines,
+        desc="Lines processed",
+        unit="lines",
+        unit_scale=True,
+        leave=False,
+        ascii=True,
+    ) as pbar:
 
         for idx, line in enumerate(f, start=0):
-            # pbar.update(1)
+        
             if idx < start_line:
+                pbar.update(1)
                 continue
-
-            parts = line.strip().split("\t")
-            if len(parts) != 6:
-                continue
-
-            s, sp, rel, e, ep, w_str = parts
-            sp = sp.lower().replace("adjective satellite", "adjective")
-            ep = ep.lower().replace("adjective satellite", "adjective")
 
             try:
-                original_weight = None
-                try:
-                    original_weight = float(w_str)
 
+                parts = line.strip().split("\t")
+                if len(parts) != 6:
+                      raise ValueError(f"Invalid line format: {line}")
+
+                s, _, rel, e, _, w_str = parts
+
+                weight = None
+                try:
+                    weight = float(w_str)
                 except ValueError:
                     pass
 
-                if original_weight > 1:
-                    original_weight = 1.0
+                if weight > 1:
+                    weight = 1.0
 
-                print(f"Processing line {idx + 1} of {total_lines}...")
-                sentence = generate_sentence(s, sp, rel, e, ep)
+                if weight is None:
+                    raise ValueError("Invalid weight: {w_str}")
 
-                records.append((s, sp, rel, e, ep, original_weight, sentence))
+                sentence = format_basic_sentence(s, rel, e)
+
+                records.append((s, rel, e, weight, sentence))
             except Exception as e:
                 print(colored(f"Error processing line {idx}: {str(e)}", "red"))
                 with open(FAILED_LINES_FILE, "a") as fl:
                     fl.write(f"{idx}\n")
+
+              
 
             if len(records) >= BATCH_SIZE:
                 cursor.executemany(insert_sql, records)
@@ -251,6 +195,8 @@ def main(restart):
                 with open(CHECKPOINT_FILE, "w") as cf:
                     cf.write(str(idx))
 
+            pbar.update(1)
+
         # final partial batch
         if records:
             cursor.executemany(insert_sql, records)
@@ -258,9 +204,10 @@ def main(restart):
             with open(CHECKPOINT_FILE, "w") as cf:
                 cf.write(str(idx))
 
+
     cursor.close()
     conn.close()
-    print("Done. Last processed line:", idx)
+    print("Done.")
 
 
 if __name__ == "__main__":
