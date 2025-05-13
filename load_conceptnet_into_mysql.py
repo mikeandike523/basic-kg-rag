@@ -51,11 +51,14 @@ for key, template in relation_templates.items():
 
 def format_basic_sentence(start_term, relation_name, end_term):
     if relation_name not in relation_templates:
-        print(colored(f"Unknown relation: {relation_name}","yellow"))
-        return f"{start_term.replace("_"," ")} {inflection.underscore(relation_name).lower().replace("_"," ")} {end_term.replace("_"," ")}."
+        print(colored(f"Unknown relation: {relation_name}", "yellow"))
+        return f"{"'"+start_term.replace("_"," ")+"'"} {inflection.underscore(relation_name).lower().replace("_"," ")} {"'"+end_term.replace("_"," ")+"'"}."
     template = relation_templates[relation_name]
-    value = template.replace("<A>", start_term.replace("_"," ")).replace("<B>", end_term.replace("_"," "))
+    value = template.replace("<A>", "'" + start_term.replace("_", " ") + "'").replace(
+        "<B>", "'" + end_term.replace("_", " ") + "'"
+    )
     return value
+
 
 def count_lines(file_path):
     """
@@ -76,7 +79,7 @@ def count_lines(file_path):
     return line_count
 
 
-def get_mistral_completion( payload, on_429_alt_sizes=None):
+def get_mistral_completion(payload, on_429_alt_sizes=None):
     """
     Send payload to local LLM; on 429, retry with smaller or alternative max_tokens.
     """
@@ -115,17 +118,17 @@ Fix the grammar of the sentence if needed.
 Generalize overly-specific examples.
 Correct tenses.
 Correct any factual incorrectness of unclarity.
+Remove quotes when appropriate.
+Add quotes when appropriate.
 
 Output only the final, correct sentence.
 
-""".strip()
+""".strip(),
         },
         {"role": "user", "content": basic_sentence},
     ]
     payload = {"messages": chat, "temperature": 0.35, "top_p": 0.95, "max_tokens": 64}
-    resp = get_mistral_completion(
-         payload, on_429_alt_sizes=[128, 256]
-    )
+    resp = get_mistral_completion(payload, on_429_alt_sizes=[128, 256])
     return resp["content"].strip()
 
 
@@ -138,7 +141,7 @@ Output only the final, correct sentence.
 )
 def main(restart):
     # 1. Figure out where to start
-    
+
     if not os.path.isfile(CHECKPOINT_FILE):
         with open(CHECKPOINT_FILE, "w") as fl:
             fl.write("0")
@@ -146,7 +149,7 @@ def main(restart):
     if not os.path.isfile(FAILED_LINES_FILE):
         with open(FAILED_LINES_FILE, "w") as FL:
             fl.write("")
-    
+
     if restart:
         start_line = 0
         with open(FAILED_LINES_FILE, "w") as fl:
@@ -159,8 +162,6 @@ def main(restart):
                 start_line = int(cf.read().strip())
         except (IOError, ValueError):
             start_line = 0
-
-    
 
     # 2. Connect to MySQL
     print("Connecting to MySQL…")
@@ -227,13 +228,12 @@ def main(restart):
                 original_weight = None
                 try:
                     original_weight = float(w_str)
-            
+
                 except ValueError:
                     pass
 
                 if original_weight > 1:
-                    original_weight = 1.0 
-
+                    original_weight = 1.0
 
                 print(f"Processing line {idx + 1} of {total_lines}...")
                 sentence = generate_sentence(s, sp, rel, e, ep)
