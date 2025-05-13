@@ -14,28 +14,6 @@ BATCH_SIZE = 4
 
 DATA_FILE = "data/conceptnet-data-en-formatted.tsv"
 
-def parse_relation_templates(raw_text):
-    template_dict = {}
-    # Match lines like: RelationName: "template string"
-    pattern = re.compile(r'^([^:]+):\s*"(.+)"\s*$')
-
-    for line in raw_text.strip().splitlines():
-        match = pattern.match(line.strip())
-        if not match:
-            continue
-        key, template = match.groups()
-        template_dict[key.strip()] = template.strip()
-
-    return template_dict
-
-
-relation_templates = {}
-
-with open("unique_relations.txt", "r", encoding="utf-8") as f:
-    raw_text = f.read()
-    relation_templates = parse_relation_templates(raw_text)
-
-print(relation_templates)
 
 def count_lines(file_path):
     """
