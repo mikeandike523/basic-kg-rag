@@ -7,6 +7,8 @@ from tqdm import tqdm
 from dotenv import dotenv_values
 import click
 from run_mistral import completion, UnfinishedResponseError
+import inflection
+import warnings
 
 # === Configurable batch size ===
 BATCH_SIZE = 4
@@ -21,6 +23,39 @@ CHECKPOINT_FILE = "data/checkpoint_line.txt"
 DATA_FILE = "data/conceptnet-data-en-formatted.tsv"
 FAILED_LINES_FILE = "data/failed_lines.txt"
 
+
+def parse_relation_templates(raw_text):
+    template_dict = {}
+    # Match lines like: RelationName: "template string"
+    pattern = re.compile(r'^([^:]+):\s*"(.+)"\s*$')
+
+    for line in raw_text.strip().splitlines():
+        match = pattern.match(line.strip())
+        if not match:
+            continue
+        key, template = match.groups()
+        template_dict[key.strip()] = template.strip()
+
+    return template_dict
+
+
+relation_templates = {}
+
+with open("unique_relations.txt", "r", encoding="utf-8") as f:
+    raw_text = f.read()
+    relation_templates = parse_relation_templates(raw_text)
+
+for key, template in relation_templates.items():
+    print(f"{key}: {template}")
+
+
+def format_basic_sentence(start_term, relation_name, end_term):
+    if relation_name not in relation_templates:
+        print(colored(f"Unknown relation: {relation_name}","yellow"))
+        return f"{start_term.replace("_"," ")} {inflection.underscore(relation_name).lower().replace("_"," ")} {end_term.replace("_"," ")}."
+    template = relation_templates[relation_name]
+    value = template.replace("<A>", start_term.replace("_"," ")).replace("<B>", end_term.replace("_"," "))
+    return value
 
 def count_lines(file_path):
     """
@@ -41,7 +76,7 @@ def count_lines(file_path):
     return line_count
 
 
-def call_local_llm(endpoint, payload, on_429_alt_sizes=None):
+def get_mistral_completion( payload, on_429_alt_sizes=None):
     """
     Send payload to local LLM; on 429, retry with smaller or alternative max_tokens.
     """
@@ -65,43 +100,32 @@ def call_local_llm(endpoint, payload, on_429_alt_sizes=None):
     raise Exception("All max_tokens options resulted in incomplete responses.")
 
 
-def get_truth_value(sentence):
-    """
-    Ask the LLM to rate truth of a sentence 0–100%. Returns fraction 0.0–1.0 or None.
-    """
-    chat = [
-        {
-            "role": "system",
-            "content": "On a scale of 0% to 100%, how true is the given sentence? Output only the final percentage.",
-        },
-        {"role": "user", "content": sentence},
-    ]
-    payload = {"max_tokens": 16, "temperature": 0.4, "top_p": 0.95, "messages": chat}
-    resp = call_local_llm(
-        "http://localhost:5000/completion", payload, on_429_alt_sizes=[32, 64]
-    )
-    match = re.search(r"(\d{1,3}(?:\.\d+)?)%?", resp["content"])
-    if match:
-        pct = float(match.group(1))
-        return min(max(pct, 0), 100) / 100
-    return None
-
-
 def generate_sentence(start, start_pos, relation, end, end_pos):
     """
     Convert a relation tuple into a simple sentence via the LLM.
     """
+    basic_sentence = format_basic_sentence(start, relation, end)
     relation_string = f"({start}) - ({relation}) - ({end})"
     chat = [
         {
             "role": "system",
-            "content": "Convert the structured relation statement into a plain sentence. The relation format is (subject) - (relation) - (object).",
+            "content": """
+
+Fix the grammar of the sentence if needed.
+
+Generalize overly-specific examples.
+Correct tenses.
+Correct any factual incorrectness of unclarity.
+
+Output only the final, correct sentence.
+
+""".strip()
         },
-        {"role": "user", "content": relation_string},
+        {"role": "user", "content": basic_sentence},
     ]
-    payload = {"messages": chat, "temperature": 0.2, "top_p": 0.95, "max_tokens": 64}
-    resp = call_local_llm(
-        "http://localhost:5000/completion", payload, on_429_alt_sizes=[128, 256]
+    payload = {"messages": chat, "temperature": 0.35, "top_p": 0.95, "max_tokens": 64}
+    resp = get_mistral_completion(
+         payload, on_429_alt_sizes=[128, 256]
     )
     return resp["content"].strip()
 
@@ -211,12 +235,10 @@ def main(restart):
                 if original_weight > 1:
                     original_weight = 1.0 
 
-                # weight = get_truth_value(generate_sentence(s, sp, rel, e, ep)) or 0.0
 
                 print(f"Processing line {idx + 1} of {total_lines}...")
                 sentence = generate_sentence(s, sp, rel, e, ep)
 
-                # records.append((s, sp, rel, e, ep, weight, sentence))
                 records.append((s, sp, rel, e, ep, original_weight, sentence))
             except Exception as e:
                 print(colored(f"Error processing line {idx}: {str(e)}", "red"))

@@ -9,3 +9,5 @@ numpy < 2.0
 
 termcolor
 bitsandbytes
+
+inflection
