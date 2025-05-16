@@ -4,7 +4,7 @@ import os
 from tqdm import tqdm
 
 # None for full dataset
-DEBUG_SMALL_DATASET = 5000
+DEBUG_SMALL_DATASET = None
 
 # === CONFIGURATION ===
 # List of two-letter language codes to retain (e.g., ['en', 'es', 'fr'])
