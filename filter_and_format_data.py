@@ -3,6 +3,9 @@ import json
 import os
 from tqdm import tqdm
 
+# None for full dataset
+DEBUG_SMALL_DATASET = 5000
+
 # === CONFIGURATION ===
 # List of two-letter language codes to retain (e.g., ['en', 'es', 'fr'])
 LANGUAGES = ['en']
@@ -63,6 +66,7 @@ def reformat_and_normalize(input_file, output_file, languages):
     malformed_json = 0
     missing_weight = 0
 
+
     with open(input_file, 'r', encoding='utf-8', newline='') as f:
         reader = csv.reader(f, delimiter='\t')
         for row in reader:
@@ -105,6 +109,9 @@ def reformat_and_normalize(input_file, output_file, languages):
     malformed_second = 0
 
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
+
+    debug_count = 0
+
     with open(input_file, 'r', encoding='utf-8', newline='') as infile, \
          open(output_file, 'w', encoding='utf-8', newline='') as outfile:
 
@@ -140,6 +147,14 @@ def reformat_and_normalize(input_file, output_file, languages):
                 raw_w
             ])
             written += 1
+
+            if DEBUG_SMALL_DATASET is not None:
+                debug_count +=1
+
+                if debug_count >= DEBUG_SMALL_DATASET:
+                    print("DEBUG: Reached small dataset limit.")
+                    break
+
 
     valid = total_filtered - malformed_json - missing_weight
     retained_pct = (written / valid * 100) if valid else 0

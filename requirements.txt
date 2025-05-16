@@ -13,3 +13,8 @@ bitsandbytes
 inflection
 
 happytransformer
+
+sentence_transformers
+
+python-arango
+qdrant-client

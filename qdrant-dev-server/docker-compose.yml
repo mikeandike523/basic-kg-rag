@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"  # Map to host, default to 6333 if not in .env
+    volumes:
+      - ./qdrant_storage:/qdrant/storage  # Persistent storage
+    restart: "no"
