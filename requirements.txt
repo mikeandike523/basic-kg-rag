@@ -18,3 +18,5 @@ sentence_transformers
 
 python-arango
 qdrant-client
+
+git+https://github.com/guardrails-ai/guardrails.git#egg=guardrails-ai

@@ -3,6 +3,10 @@
 eval "$("$HOME/anaconda3/bin/conda" shell.bash hook)"
 conda activate basic-kg-rag-env
 
+script_dir="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+
+export PYTHONPATH="$script_dir${PYTHONPATH:+:$PYTHONPATH}"
+
 "$@"
 
 conda deactivate
