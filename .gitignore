@@ -2,3 +2,4 @@ data
 curated-facts
 **/__pycache__
 __pycache__
+OPENAI_API_KEY.txt

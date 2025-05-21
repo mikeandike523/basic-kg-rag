@@ -1,14 +1,19 @@
 import os
-import sys
 import json
 from typing import List, Optional, Union
 from run_mistral import completion, UnfinishedResponseError
-from dataclasses import dataclass
 import time
 
-DEFAULT_TEMPERATURE = 0.6
+DEFAULT_TEMPERATURE = 0.5
 DEFAULT_TOP_P = 0.9
-SIZE_TRIES = 3
+SIZE_TRIES = 6
+SIZE_TRIES_MULTIPLIER = 2
+DECISION_TRIES = 3
+
+DECISION_TOKENS = 16
+NAME_TOKENS=64
+SUMMARY_TOKENS = 256
+
 
 
 def ask_mistral(
@@ -33,7 +38,7 @@ def ask_mistral(
         try:
             answer = completion(
                 {
-                    "max_tokens": max_tokens * (2**try_count),
+                    "max_tokens": int(max_tokens * (SIZE_TRIES_MULTIPLIER**try_count)),
                     "messages": messages,
                     "temperature": temperature,
                     "top_p": top_p,
@@ -46,7 +51,7 @@ def ask_mistral(
             return answer.strip()
         except UnfinishedResponseError as e:
             print(
-                f"Output token limit {max_tokens * (2**try_count)} was not enough. Trying with twice as much tokens..."
+                f"Output token limit {int(max_tokens * (SIZE_TRIES_MULTIPLIER**try_count))} was not enough. Trying with {int(max_tokens * (SIZE_TRIES_MULTIPLIER**(try_count+1)))}  tokens..."
             )
             if try_count == SIZE_TRIES - 1:
                 print(
@@ -72,13 +77,13 @@ topics = []
 first_paragraph = paragraphs[0]
 
 current_subject = ask_mistral(
-    128,
+    NAME_TOKENS,
     first_paragraph,
     system_instruction="""Please provide a name for the current topic as shown in the given paragraph, or "Unknown" if you are unsure.""",
 )
 
 current_subject_summary = ask_mistral(
-    256,
+    SUMMARY_TOKENS,
     first_paragraph,
     system_instruction="""Please provide a short summary of the current topic, or "Unknown" if you are unsure.""",
 )
@@ -89,7 +94,7 @@ current_topic_paragraphs.append(first_paragraph)
 def continue_topic(next_paragraph: str) -> None:
     global current_subject, current_subject_summary, current_topic_paragraphs
     new_name_response = ask_mistral(
-        128,
+        NAME_TOKENS,
         f"""
 [Current Topic]: {current_subject}
 [Current Summary]:
@@ -109,7 +114,7 @@ Reply with only the adjusted topic name, and no extra labels or indicators.
 """.strip(),
     )
     new_summary_response = ask_mistral(
-        128,
+        SUMMARY_TOKENS,
         f"""
 [Current Topic]: {current_subject}
 [Current Summary]:
@@ -148,12 +153,12 @@ def start_new_topic(next_paragraph: str) -> None:
 
     # Start the new topic
     current_subject = ask_mistral(
-        128,
+        NAME_TOKENS,
         next_paragraph,
         system_instruction="""Please provide a name for the current topic as shown in the given paragraph. Reply "Unsure" if you are unsure.""",
     )
     current_subject_summary = ask_mistral(
-        256,
+        SUMMARY_TOKENS,
         next_paragraph,
         system_instruction="""Please provide a short summary of the current topic. Reply "Unsure" if you are unsure.""",
     )
@@ -163,46 +168,59 @@ def start_new_topic(next_paragraph: str) -> None:
 # Process remaining paragraphs
 for i, paragraph in enumerate(paragraphs[1:], start=2):
     print(f"\nProcessing paragraph {i}/{len(paragraphs)}...")
-    decision = (
-        ask_mistral(
-            64,
-            f"""
-[Current Topic]: {current_subject}
-[Current Summary]:
+    decision = None
+    decision_tries = 0
+    while decision is None:
+        decision = (
+            ask_mistral(
+                DECISION_TOKENS,
+                f"""
+    [Current Topic]: {current_subject}
+    [Current Summary]:
 
-{current_subject_summary}
+    {current_subject_summary}
 
-[Next Paragraph]:
-{paragraph}
+    [Next Paragraph]:
+    {paragraph}
 
-""",
-            system_instruction="""
-Given the name of the current topic, and a summary of the current topic, and the next paragraph,
-        
-does the following paragraph continue in the current topic or start a new one?
+    """,
+                system_instruction="""
+    Given the name of the current topic, and a summary of the current topic, and the next paragraph,
+            
+    does the following paragraph continue in the current topic or start a new one?
 
-Reply "new_topic" if it starts a new topic, otherwise "continue_topic". If you are unsure, say "continue_topic" so you can decide later.
-""",
+    Reply "new_topic" if it starts a new topic, otherwise "continue_topic". If you are unsure, say "continue_topic" so you can decide later.
+    """,
+            )
+            .lower()
+            .strip()
+            .strip('"\'`.:!><-()=+[]{}|;:,.<>?/~`"')
+            .replace(" ", "_")
         )
-        .lower()
-        .strip()
-        .strip('"\'`.:!><-()=+[]{}|;:,.<>?/~`"')
-        .replace(" ", "_")
-    )
 
-    print(f"Decision: {decision}")
+        print(f"Decision: {decision}")
 
-    if "continue_topic" in decision:
-        continue_topic(paragraph)
-    elif "new_topic" in decision:
-        start_new_topic(paragraph)
-    else:
-        raise ValueError(
-            "Invalid decision: '" + decision + f"' at paragraph {i}/{len(paragraphs)}"
-        )
+        if "continue_topic" in decision:
+            continue_topic(paragraph)
+        elif "new_topic" in decision:
+            start_new_topic(paragraph)
+        else:
+            decision_tries += 1
+            decision = None
+            print(
+                f"Invalid decision at try #{decision_tries}, on to try {decision_tries+1} of {DECISION_TRIES}... \n"
+            )
+
+            if decision_tries >= DECISION_TRIES:
+
+                raise ValueError(
+                    f"Invalid decision after {decision_tries} tries: '"
+                    + decision
+                    + f"' at paragraph {i}/{len(paragraphs)}"
+                )
 
     # Save to JSON
-    with open("topicized_flatland.json", "w", encoding="utf-8") as f:
+    with open("story_learner/topicized_flatland_mistral_7b_instruct.json", "w", encoding="utf-8") as f:
         json.dump(topics, f, indent=2, ensure_ascii=False)
 
 
@@ -217,7 +235,7 @@ if current_subject and current_topic_paragraphs:
     )
 
 # Save to JSON
-with open("topicized_flatland.json", "w", encoding="utf-8") as f:
+with open("story_learner/topicized_flatland_mistral_7b_instruct.json", "w", encoding="utf-8") as f:
     json.dump(topics, f, indent=2, ensure_ascii=False)
 
-print("\nFinished. Topics written to 'topicized_flatland.json'")
+print("\nFinished. Topics written to 'story_learner/topicized_flatland_mistral_7b_instruct.json'")

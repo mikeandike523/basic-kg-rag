@@ -9,8 +9,8 @@ from termcolor import colored
 MAX_CONTEXT_TOKENS = 8192
 
 bnb_config = BitsAndBytesConfig(
-    load_in_4bit=False,  # or False if you want 8-bit
-    bnb_4bit_quant_type="nf4",  # “nf4” usually gives better perf/quality than “fp4”
+    load_in_4bit=False,
+    bnb_4bit_quant_type="nf4",
     bnb_4bit_compute_dtype=torch.float16,
 )
 
