@@ -14,7 +14,7 @@ DECISION_TOKENS = 16
 NAME_TOKENS=64
 SUMMARY_TOKENS = 256
 
-
+OUTPUT_FILENAME="story_learner/topicized_flatland_mistral_7b_instruct_quantized_8bit"
 
 def ask_mistral(
     max_tokens: int,
@@ -62,8 +62,8 @@ def ask_mistral(
 
 
 def get_title_and_summary(text: str) -> Tuple[str, str]:
-    title = ask_mistral(NAME_TOKENS, text,"Choose a good title for the given text. Output only the title and nothing else.")
-    summary = ask_mistral(SUMMARY_TOKENS, text, "Create a short summary of the given text. Output only the summary and nothing else.")
+    title = ask_mistral(NAME_TOKENS, text,"Choose a good title for the given text.")
+    summary = ask_mistral(SUMMARY_TOKENS, text, "Create a short summary of the given text.")
     return title, summary
 
 
@@ -143,7 +143,7 @@ for i, paragraph in enumerate(paragraphs[1:], start=2):
                 )
 
     # Save to JSON
-    with open("story_learner/topicized_flatland_mistral_7b_instruct.json", "w", encoding="utf-8") as f:
+    with open(OUTPUT_FILENAME, "w", encoding="utf-8") as f:
         json.dump(topics, f, indent=2, ensure_ascii=False)
 
 
@@ -160,7 +160,7 @@ if current_topic_paragraphs:
     )
 
 # Save to JSON
-with open("story_learner/topicized_flatland_mistral_7b_instruct.json", "w", encoding="utf-8") as f:
+with open(OUTPUT_FILENAME, "w", encoding="utf-8") as f:
     json.dump(topics, f, indent=2, ensure_ascii=False)
 
-print("\nFinished. Topics written to 'story_learner/topicized_flatland_mistral_7b_instruct.json'")
+print(f"\nFinished. Topics written to '{OUTPUT_FILENAME}'")

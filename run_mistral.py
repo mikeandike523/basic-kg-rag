@@ -6,7 +6,7 @@ from collections import defaultdict
 from termcolor import colored
 
 
-MAX_CONTEXT_TOKENS = 8192
+MAX_CONTEXT_TOKENS = 16384
 
 bnb_config = BitsAndBytesConfig(
     load_in_4bit=False,
