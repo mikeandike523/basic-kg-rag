@@ -1,6 +1,6 @@
-import os
 import time
 import logging
+from typing import Tuple
 import click
 import random
 import numpy as np
@@ -13,11 +13,11 @@ from tqdm import tqdm
 import hashlib
 
 # === Tunable constants ===
-TOP_K = 20                    # Number of nearest neighbors to retrieve
-MAX_EDGES_PER_START = 75     # Max edges to collect per initial end node
-N_EDGES_PER_PROP = 5        # Number of edges to sample each propagation step
-MAX_DEPTH = 50              # Max propagation fronts (depth)
-CUTOFF_RELEVANCY = 0.5   
+TOP_K = 10                    # Number of nearest neighbors to retrieve
+MAX_EDGES_PER_START = 40     # Max edges to collect per initial end node
+N_EDGES_PER_PROP = 3        # Number of edges to sample each propagation step
+MAX_DEPTH = 25             # Max propagation fronts (depth)
+CUTOFF_RELEVANCY = 0.75   
 CUTOFF_TRUTH = 0.75 # 
 HASH_HEX_CHARS = 24
 
@@ -81,7 +81,7 @@ def get_node_name(handle: str) -> str:
     return name
 
 # === Modular functions ===
-def search_query(query: str) -> (list, np.ndarray):
+def search_query(query: str) -> Tuple[list, np.ndarray]:
     """
     Perform Qdrant vector search and return top-K edge IDs plus the encoded query vector.
     """
@@ -101,10 +101,13 @@ def search_query(query: str) -> (list, np.ndarray):
     logger.info(f"Retrieved {len(hits)} hits in {time.time() - start:.2f}s")
     return [hit.id for hit in hits], query_vector
 
+def cos_sim_to_relevancy(cos_sim: float) -> float:
+    return (cos_sim - (-1))/(1 - (-1))
+
 
 def collect_cascade(seed_id: str, query_vector: np.ndarray) -> list:
     """
-    For a starting edge ID, perform a weighted BFS cascade with weighted sampling by (cosine similarity^2 * truth value).
+    For a starting edge ID, perform a weighted BFS cascade with weighted sampling by ( (cos_similarity+1)/2 * truth value).
     """
     seed_doc = edges_col.get(seed_id)
     if not seed_doc:
@@ -122,7 +125,8 @@ def collect_cascade(seed_id: str, query_vector: np.ndarray) -> list:
     seed_sentence = seed_doc['sentence']
     sv = model.encode(seed_sentence)
     cos_sim = np.dot(query_vector, sv) / (q_norm * np.linalg.norm(sv)) if q_norm else 0.0
-    line = f"{seed_sentence}\t({seed_pct}% True)\t({int((cos_sim**2)*100)}% Relevant)"
+    relevancy = cos_sim_to_relevancy(cos_sim)
+    line = f"{seed_sentence}\t({seed_pct}% True)\t({int((relevancy)*100)}% Relevant)"
     results.append((seed_doc['_key'], line))
     logger.debug(f"Seed line: {line}")
 
@@ -142,13 +146,12 @@ def collect_cascade(seed_id: str, query_vector: np.ndarray) -> list:
             logger.info("No further edges to propagate.")
             break
 
-        # Compute scores = (cos_sim^2) * weight
         scores = []
         for e in potential:
             sv = model.encode(e['sentence'])
             sim = (np.dot(query_vector, sv) / (q_norm * np.linalg.norm(sv))) if q_norm else 0.0
-            sim_sq = sim * sim
-            scores.append(sim_sq * e['weight'])
+            relevancy = cos_sim_to_relevancy(sim)
+            scores.append(relevancy * e['weight'])
         scores = np.array(scores, dtype=float)
         if not np.any(scores > 0):
             logger.warning("All candidate scores are zero; stopping propagation.")
@@ -169,14 +172,13 @@ def collect_cascade(seed_id: str, query_vector: np.ndarray) -> list:
             sentence = e['sentence']
             sv = model.encode(sentence)
             cos_sim_e = (np.dot(query_vector, sv) / (q_norm * np.linalg.norm(sv))) if q_norm else 0.0
-            relevance_pct= int((cos_sim_e**2)*100)
+            relevance_pct= int((cos_sim_to_relevancy(cos_sim_e))*100)
             line = f"{sentence}\t({pct}% True)\t({relevance_pct}% Relevant)"
-            if cos_sim_e  * cos_sim_e >= CUTOFF_RELEVANCY and e['weight'] >= CUTOFF_TRUTH:
+            if cos_sim_to_relevancy(cos_sim_e) >= CUTOFF_RELEVANCY and e['weight'] >= CUTOFF_TRUTH:
                 results.append((e['_key'], line))
             logger.debug(f"Propagated line: {line}")
-            # Probabilistic propagation based on squared similarity
             rand_val = random.random()
-            prob_continue = cos_sim_e * cos_sim_e * e['weight']
+            prob_continue = cos_sim_to_relevancy(cos_sim_e) * e['weight']
             if rand_val <= prob_continue:
                 next_frontier.append(e['_to'])
                 logger.debug(f"Continue propagation (rand={rand_val:.2f} <= sim^2={prob_continue:.2f}) for edge {e['_key']}")
