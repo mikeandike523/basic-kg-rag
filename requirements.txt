@@ -1,22 +1,18 @@
-torch==2.2.2+cu121
-torchvision==0.17.2+cu121
-torchaudio==2.2.2+cu121
---extra-index-url https://download.pytorch.org/whl/cu121
-
-transformers>=4.36.0
-accelerate>=0.23.0
-numpy < 2.0
-
+transformers
+accelerate
 termcolor
 bitsandbytes
-
 inflection
-
-happytransformer
-
 sentence_transformers
-
 python-arango
 qdrant-client
-
 openai
+pandas
+scipy
+matplotlib
+tqdm
+requests
+click
+python-dotenv
+mysql-connector-python
+fpdf

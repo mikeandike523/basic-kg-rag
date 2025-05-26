@@ -7,15 +7,8 @@ channels:
 dependencies:
   - python=3.12
   - pip
-  - numpy
-  - pandas
-  - scipy
-  - matplotlib
-  - tqdm
-  - requests
-  - click
-  - python-dotenv
-  - mysql-connector-python
+  - numpy < 2.0
   - pytorch
-  - transformers
-  - SentencePiece
+  - torchvision
+  - torchaudio
+  - pytorch-cuda=12.1
