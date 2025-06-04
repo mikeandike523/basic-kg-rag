@@ -6,6 +6,10 @@ if [ "$#" -ne 1 ]; then
   exit 1
 fi
 
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"  # This loads nvm
+[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"  # This loads nvm bash_completion
+
 INPUT_FILE="$1"
 DEST_FILE="./story_learner/sectionizer-viewer/sections.json"
 
@@ -34,4 +38,6 @@ fi
 
 echo "Starting http-server on port $FOUND_PORT..."
 # Run the server
+
+nvm use node
 pnpx http-server ./story_learner/sectionizer-viewer -p "$FOUND_PORT"

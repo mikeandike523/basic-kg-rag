@@ -1,25 +1,24 @@
 import os
 import json
-from typing import List, Optional, Union
+import re
+from typing import List, Optional
 
 from termcolor import colored
 from run_mistral import Mistral, UnfinishedResponseError
 import time
 
-DEFAULT_TEMPERATURE = 0.70
-DEFAULT_TOP_P = 0.90
-SIZE_TRIES = 5
-DECISION_TRIES = 3
-DECISION_TOKENS = 16
+TEMPERATURES = [ 0.6, 0.6, 0.6, 0.7, 0.7, 0.7]
+TOP_P = 0.9
 
 mistral = Mistral(quantization="8bit")
+
 
 def ask_mistral(
     max_token_seq: List[int],
     prompt: str,
     system_instruction: Optional[str] = None,
-    temperature: Optional[float] = DEFAULT_TEMPERATURE,
-    top_p: Optional[float] = DEFAULT_TOP_P,
+    temperature: Optional[float] = TEMPERATURES[0],
+    top_p: Optional[float] = TOP_P,
     report_time: bool = False,
 ) -> str:
     messages = []
@@ -27,12 +26,11 @@ def ask_mistral(
         messages.append({"role": "system", "content": system_instruction})
     messages.append({"role": "user", "content": prompt})
     start_time = time.time()
-    try_count = 0
-    while try_count < SIZE_TRIES:
+    for i in range(len(max_token_seq)):
         try:
             answer = mistral.completion(
                 {
-                    "max_tokens": int(max_tokens * (SIZE_TRIES_MULTIPLIER**try_count)),
+                    "max_tokens": max_token_seq[i],
                     "messages": messages,
                     "temperature": temperature,
                     "top_p": top_p,
@@ -45,16 +43,12 @@ def ask_mistral(
             return answer.strip()
         except UnfinishedResponseError as e:
             print(
-                f"Output token limit {int(max_tokens * (SIZE_TRIES_MULTIPLIER**try_count))} was not enough. Trying with {int(max_tokens * (SIZE_TRIES_MULTIPLIER**(try_count+1)))}  tokens..."
+                f"Unfinished response after at try {i+1}/{len(max_token_seq)} with max tokens {max_token_seq[i]}..."
             )
-            print(json.dumps(messages, indent=2))
-            print(colored("Generated output: " + e.generation, "yellow"))
-            if try_count == SIZE_TRIES - 1:
-                print(
-                    "Hit max retry tokens already, cannot continue. Consider adjusting global variable SIZE_TRIES, but be wary of exceeding model max token limit."
-                )
-                raise e
-            try_count += 1
+            print(e.generation)
+
+    print("Unfinished response after all attempts.")
+    return None
 
 
 os.chdir(os.path.dirname(__file__))
@@ -64,64 +58,96 @@ with open("flatland.txt", "r", encoding="utf-8") as f:
 
 paragraphs = [p.strip() for p in flatland_text.split("\n\n") if p.strip()]
 
-sections = [[]]
+sections = [[paragraphs[0]]]
+
+pargraphs = paragraphs[1:]
 
 for i, paragraph in enumerate(paragraphs):
     print(f"Processing paragraph {i+1}/{len(paragraphs)}...")
-        
-    decision = ask_mistral(
-        DECISION_TOKENS,
-        "\n\n".join([
-f"""
-[Existing Text]:
+
+    final_decision = "continue_topic"
+
+    for i, temperature in enumerate(TEMPERATURES):
+
+        print(
+            f"Attempting at temperature {temperature} (trial {i+1}/{len(TEMPERATURES)})..."
+        )
+
+        decision = ask_mistral(
+            [8, 8, 16, 16, 16, 24, 24, 32],
+            "\n\n".join(
+                [
+                    f"""
+[Existing Text]
 
 {"\n\n".join(sections[-1])}
 
-""".strip(),
-f"""
-[Next Paragraph]:
+    """.strip(),
+                    f"""
+[Next Paragraph]
 
 {paragraph}
 
-""".strip()
-        ]),
-        system_instruction="""
-Given the existing text, decide if the next paragraph starts a new section.
+    """.strip(),
+                ]
+            ),
+            system_instruction="""
 
-Look for distinct section markers such as chapter titles, headings, table of contents, forward, etc.
+Given the existing text, decide if the next paragraph starts a new topic or continues the current one.
 
-Use the existing text as context to avoid false positives.
-
-Some potential false positives include:
-
-- Dialog / play-like formatting
-- Hyperlinks
-- Code snippets
-- Placeholders for external media such as images and videos
-
-Answer "yes" or "no".
+Answer "new_topic", "continue_topic" or "unsure".
 
 """.strip(),
-    ).strip().lower().strip('"\'`.:!><-()=+[]{}|;:,.<>?/~`"')
+            temperature=temperature,
+            top_p=TOP_P,
+            report_time=True,
+        )
 
-    
+        if decision is None:
+            print(colored(f"AI could not complete response at temperature {temperature} after all token length choices."))
+            print(colored("Trying with the next temperature choice."))
+            print(colored("Note. Temperature choices may be repeated to attempt same temperature multiple times.", "yellow"))
+            continue
 
-    if decision.startswith("yes"):
+        decision = (
+            decision.strip()
+            .lower()
+            .strip('"\'`.:!><-()=+[]{}|;:,.<>?/~`"')
+            .replace(" ", "_")
+        )
+
+        if re.match(r"^new_topic\b", decision):
+            final_decision = "new_topic"
+            break
+
+        elif re.match(r"^continue_topic\b", decision):
+            final_decision = "continue_topic"
+            break
+
+        elif re.match(r"^unsure\b", decision):
+            final_decision = "continue_topic"
+            break
+        else:
+            print(
+                colored(f"Invalid decision: '{decision}' (T {temperature})", "yellow")
+            )
+
+    print(f"Final decision: {final_decision}")
+
+    if final_decision == "new_topic":
         sections.append([paragraph])
-
-    elif decision.startswith("no"):
+    elif final_decision == "continue_topic":
         sections[-1].append(paragraph)
-
     else:
-        print(f"Invalid decision: {decision}")
-        exit(1)
+        raise ValueError(f"Invalid final decision: '{final_decision}'")
+
 
 sections = [s for s in sections if s]
 
-sections = [{
-    "title":section[0].strip(),
-    "paragraphs": [p.strip() for p in section[1:]]
-} for section in sections]
+sections = [
+    {"title": f"section_{i+1}", "paragraphs": [p.strip() for p in section]}
+    for i, section in enumerate(sections)
+]
 
 with open("sections.json", "w", encoding="utf-8") as f:
     json.dump(sections, f, indent=2, ensure_ascii=False)
